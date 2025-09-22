@@ -430,25 +430,58 @@ async def parse_pdf(file_path):
                                 new_tarif = await tarifs.insert_one({"area_zone": zone_obj["area_zone"], "services": zone_obj["services"]})
 
 
-                        # if zone_doc:
-                        #     zone_doc берем сервисы и смотрим есть ли там servicesservices елси не то доавляем
-                        #     new_zone_doc = await tarifs.update_one({"area_zone": zone_obj["area_zone"]}, "services": append servicesservices})
                         if zone_doc:
                             existing_services = zone_doc.get("services", [])
                             new_services = []
 
                             for service in zone_obj["services"]:
-                                # проверяем, есть ли сервис с таким же именем
-                                if not any(s["name"] == service["name"] for s in existing_services):
+                                # ищем, есть ли такой сервис в зоне
+                                existing_service = next((s for s in existing_services if s["name"] == service["name"]), None)
+
+                                if not existing_service:
+                                    # весь сервис новый, добавляем целиком
                                     new_services.append(service)
+                                else:
+                                    # сервис уже есть, проверяем блоки цен
+                                    existing_prices = existing_service.get("prices", [])
+                                    new_prices = []
+
+                                    for price_entry in service.get("prices", []):
+                                        # проверяем, есть ли уже такой вес в существующих ценах
+                                        if not any(p["weight"] == price_entry["weight"] for p in existing_prices):
+                                            new_prices.append(price_entry)
+
+                                    if new_prices:
+                                        # обновляем существующий сервис, добавляем новые веса
+                                        await tarifs.update_one(
+                                            {"area_zone": zone_obj["area_zone"], "services.name": service["name"]},
+                                            {"$push": {"services.$.prices": {"$each": new_prices}}}
+                                        )
+                                        print(f"Added {len(new_prices)} new price entries to service {service['name']} in zone {zone_obj['area_zone']}")
 
                             if new_services:
-                                # Добавляем отсутствующие сервисы
+                                # Добавляем полностью новые сервисы
                                 await tarifs.update_one(
                                     {"area_zone": zone_obj["area_zone"]},
                                     {"$push": {"services": {"$each": new_services}}}
                                 )
                                 print(f"Added {len(new_services)} new services to zone {zone_obj['area_zone']}")
+                        # if zone_doc:
+                        #     existing_services = zone_doc.get("services", [])
+                        #     new_services = []
+
+                        #     for service in zone_obj["services"]:
+                        #         # проверяем, есть ли сервис с таким же именем
+                        #         if not any(s["name"] == service["name"] for s in existing_services):
+                        #             new_services.append(service)
+
+                        #     if new_services:
+                        #         # Добавляем отсутствующие сервисы
+                        #         await tarifs.update_one(
+                        #             {"area_zone": zone_obj["area_zone"]},
+                        #             {"$push": {"services": {"$each": new_services}}}
+                        #         )
+                        #         print(f"Added {len(new_services)} new services to zone {zone_obj['area_zone']}")
 
 
 @app.get("/")
