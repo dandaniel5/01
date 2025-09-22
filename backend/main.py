@@ -19,7 +19,6 @@ MONGO_USERNAME = os.environ.get("MONGO_USERNAME", "root")
 MONGO_PASSWORD = os.environ.get("MONGO_PASSWORD", "example")
 
 MONGO_URI = f"mongodb://{MONGO_USERNAME}:{MONGO_PASSWORD}@{MONGO_HOST}:{MONGO_PORT}"
-# MONGO_URI = "mongodb://root:example@127.0.0.1:27017"
 DB_NAME = "tarifs_db"
 
 client = AsyncMongoClient(MONGO_URI)
@@ -79,12 +78,10 @@ async def get_price(line: str) -> Optional[float]:
     if not (service_name and zone and weight):
         return None
 
-    # 1. Находим зону
     zone_doc = await tarifs.find_one({"area_zone": zone}, {"_id": 0, "services": 1})
     if not zone_doc:
         return None
 
-    # 2. Находим сервис по тексту
     service_doc = None
     for s in zone_doc["services"]:
         if normalize_service(s["name"]) == service_name:
@@ -94,12 +91,10 @@ async def get_price(line: str) -> Optional[float]:
         return None
 
 
-    # 3. Сопоставляем вес с ценой, округляя вверх до ближайшего существующего
     prices = service_doc.get("prices", [])
     if not prices:
         return None
 
-    # все доступные веса, отсортированные
     available_weights = sorted(p["weight"] for p in prices)
     target_weight = next((w for w in available_weights if w >= weight), None)
     if target_weight is None:
@@ -107,6 +102,7 @@ async def get_price(line: str) -> Optional[float]:
 
     price_entry = next((p for p in prices if p["weight"] == target_weight), None)
     return price_entry["price"] if price_entry else None
+
 # ------------------------------------------
 # Вспомогательные нормализации
 # ------------------------------------------
@@ -124,7 +120,6 @@ def parse_zone(text: str) -> Tuple[Optional[str], bool]:
     text = text.strip()
     has_to = False
 
-    # Ключевые фразы
     patterns = [
         (r"U\.S\. package rates to\s*(.*)", True),
         (r"U\.S\. package rates:\s*(.*)", False)
@@ -139,12 +134,10 @@ def parse_zone(text: str) -> Tuple[Optional[str], bool]:
                 return zone_text.split()[1], to_flag
             return zone_text, to_flag
 
-    # Если не нашли, ищем "Zone <номер>"
     m = re.search(r"Zone\s*(\d+)", text, re.IGNORECASE)
     if m:
         return m.group(1).strip(), False
 
-    # Возвращаем исходный текст и False, если ничего не найдено
     return text, False
 
 
@@ -153,10 +146,9 @@ def normalize_weight(raw: str) -> Optional[List[int]]:
     if not raw:
         return None
     raw = raw.strip().lower()
-    # ищем все числа в строке
     numbers = re.findall(r"\d+", raw)
     if numbers:
-        return [int(numbers[-1])]  # берём последнее число
+        return [int(numbers[-1])]
     return None
 
 
@@ -165,7 +157,6 @@ def normalize_zone(raw: str) -> Optional[int]:
     if not raw:
         return None
     raw = raw.strip().lower()
-    # ищем pattern "z" или "zone" + число
     m = re.search(r"(?:z|zone)\s*(\d+)", raw)
     if m:
         return int(m.group(1))
@@ -175,7 +166,7 @@ def normalize_zone(raw: str) -> Optional[int]:
 def parse_weight(text: str) -> Optional[int]:
     if not text:
         return None
-    # примеры: "1lb.", "2 lbs.", "36"
+
     m = re.search(r"(\d+)", text)
     return int(m.group(1)) if m else None
 
@@ -202,27 +193,21 @@ VALID_SERVICES = [
     "home delivery"
 ]
 
-# сортируем по длине по убыванию, чтобы "2day am" проверялся раньше "2day"
 VALID_SERVICES.sort(key=len, reverse=True)
 
 def normalize_service(text: str):
     if not text:
         return None
 
-    # чистим текст: переносы строк, табуляции, множественные пробелы
     text = re.sub(r'\s+', ' ', text.lower()).strip()
-    text = text.replace("®", "").replace("@", "").replace(".", "").strip()  # убираем точки
+    text = text.replace("®", "").replace("@", "").replace(".", "").strip()
 
-    # ищем совпадение с валидными сервисами
     for service in VALID_SERVICES:
         if service in text:
             return service.title()
     return None
 
 
-# ------------------------------------------
-# Основной парсер
-# ------------------------------------------
 
 VALID_RANGES = [(1, 26)] 
 
@@ -234,56 +219,10 @@ def is_valid_weight(weight: int) -> bool:
     return False
 
 
-
-# async def save_zones_to_db_bulk(zones: List[Zone]):
-#     """
-#     Сохраняем зоны в базу без дублирования.
-#     Для каждой зоны проверяем:
-#     - если зоны нет — вставляем полностью
-#     - если зона есть — сравниваем все вложенные сервисы и цены, добавляем недостающие
-#     """
-#     for zone in zones:
-#         zone_dict = zone.dict()
-#         area_zone = zone.area_zone
-
-#         # ищем существующую запись
-#         existing = await tarifs.find_one({"area_zone": area_zone})
-
-#         if existing:
-#             existing_services = existing.get("services", [])
-#             updated = False
-
-#             for new_service in zone_dict["services"]:
-#                 match_service = next((s for s in existing_services if s["name"] == new_service["name"]), None)
-#                 if match_service:
-#                     # сравниваем цены
-#                     existing_prices_set = {(p["weight"], p["price"]) for p in match_service.get("prices", [])}
-#                     new_prices = [p for p in new_service["prices"] if (p["weight"], p["price"]) not in existing_prices_set]
-
-#                     if new_prices:
-#                         match_service["prices"].extend(new_prices)
-#                         updated = True
-#                 else:
-#                     # сервис полностью новый — добавляем
-#                     existing_services.append(new_service)
-#                     updated = True
-
-
-#             if updated:
-#                 await tarifs.replace_one(
-#                     {"area_zone": area_zone},
-#                     {"area_zone": area_zone, "services": existing_services}
-#                 )
-#         else:
-#             await tarifs.insert_one(zone_dict)
-
-
-
 async def save_zones_to_db_bulk(zones: List[Zone]):
     zone_dicts = [zone.dict() for zone in zones]
     if zone_dicts:
         result = await tarifs.insert_many(zone_dicts)
-        # print(f"Inserted {len(result.inserted_ids)} zones")
 
 
 
@@ -296,7 +235,7 @@ def parse_services(table: List[List[str]], zone_number: int, has_to: bool) -> Zo
             for idx, cell in enumerate(header)
             if cell 
             and ("@" in cell or "®" in cell)
-            and not cell.strip().startswith("FedEx®\nEnvelope")  # пропускаем такие строки
+            and not cell.strip().startswith("FedEx®\nEnvelope")
         }
 
 
@@ -315,7 +254,6 @@ def parse_services(table: List[List[str]], zone_number: int, has_to: bool) -> Zo
                 weights = [parse_weight(w) for w in re.split(r"[\s\n]+", weight_cell) if parse_weight(w) is not None]
                 price_parts = [parse_price(p) for p in re.split(r"[\s\n]+", price_cell) if parse_price(p) is not None]
 
-                # Используем итератор, чтобы не потерять соответствие
                 price_iter = iter(price_parts)
                 for weight in weights:
                     try:
@@ -323,22 +261,19 @@ def parse_services(table: List[List[str]], zone_number: int, has_to: bool) -> Zo
                         prices.append({"weight": weight, "price": price})
                 
                     except StopIteration:
-                        break  # если цен меньше, чем весов
+                        break
 
             services.append({"name": service_name, "prices": prices})
-            
-            
-        # return Zone(area_zone=zone_number, services=services)
 
         pass
     else:
-        header = table[1]  # строка с названиями сервисов
+        header = table[1]
         service_indices = {
             idx: cell.strip()
             for idx, cell in enumerate(header)
             if cell 
             and ("@" in cell or "®" in cell)
-            and not cell.strip().startswith("FedEx®\nEnvelope")  # пропускаем такие строки
+            and not cell.strip().startswith("FedEx®\nEnvelope")
         }
 
     
@@ -357,7 +292,6 @@ def parse_services(table: List[List[str]], zone_number: int, has_to: bool) -> Zo
                 weights = [parse_weight(w) for w in re.split(r"[\s\n]+", weight_cell) if parse_weight(w) is not None]
                 price_parts = [parse_price(p) for p in re.split(r"[\s\n]+", price_cell) if parse_price(p) is not None]
 
-                # Используем итератор, чтобы не потерять соответствие
                 price_iter = iter(price_parts)
                 for weight in weights:
                     try:
@@ -365,7 +299,7 @@ def parse_services(table: List[List[str]], zone_number: int, has_to: bool) -> Zo
                         prices.append({"weight": weight, "price": price})
                 
                     except StopIteration:
-                        break  # если цен меньше, чем весов
+                        break 
 
             services.append({"name": service_name, "prices": prices})
 
@@ -383,21 +317,15 @@ async def parse_pdf(file_path):
 
                 if page_text:
                     zone, has_to = parse_zone(page_text)
-                    
-                    # Если ключевая фраза содержала "to", берём номер зоны из таблицы
                     if has_to:
                         for first_table in tables:
                             
-                            if len(first_table) > 1:  # минимум 2 строки
-                                # проверяем вторую строку
+                            if len(first_table) > 1:
                                 second_row = first_table[1]
 
                                 hard_zone_name = None
-
-                                # пробуем взять -5 элемент
                                 if len(second_row) >= 5 and second_row[-5]:
                                     hard_zone_name = second_row[-5].strip()
-                                # если нет, пробуем -3 элемент
                                 elif len(second_row) >= 3 and second_row[-3]:
                                     hard_zone_name = second_row[-3].strip()
                                 
@@ -418,9 +346,6 @@ async def parse_pdf(file_path):
                         servicesservices = parse_services(table, zone_number=zone_obj["area_zone"], has_to=has_to)
                         
                         zone_obj["services"] = servicesservices
-                        # print("servicesservices", zone_obj)
-
-                        
 
                         zone_doc = await tarifs.find_one({"area_zone": zone_obj["area_zone"]}, {"_id": 0, "services": 1})
                         if not zone_doc:
@@ -435,24 +360,19 @@ async def parse_pdf(file_path):
                             new_services = []
 
                             for service in zone_obj["services"]:
-                                # ищем, есть ли такой сервис в зоне
                                 existing_service = next((s for s in existing_services if s["name"] == service["name"]), None)
 
                                 if not existing_service:
-                                    # весь сервис новый, добавляем целиком
                                     new_services.append(service)
                                 else:
-                                    # сервис уже есть, проверяем блоки цен
                                     existing_prices = existing_service.get("prices", [])
                                     new_prices = []
 
                                     for price_entry in service.get("prices", []):
-                                        # проверяем, есть ли уже такой вес в существующих ценах
                                         if not any(p["weight"] == price_entry["weight"] for p in existing_prices):
                                             new_prices.append(price_entry)
 
                                     if new_prices:
-                                        # обновляем существующий сервис, добавляем новые веса
                                         await tarifs.update_one(
                                             {"area_zone": zone_obj["area_zone"], "services.name": service["name"]},
                                             {"$push": {"services.$.prices": {"$each": new_prices}}}
@@ -460,28 +380,11 @@ async def parse_pdf(file_path):
                                         print(f"Added {len(new_prices)} new price entries to service {service['name']} in zone {zone_obj['area_zone']}")
 
                             if new_services:
-                                # Добавляем полностью новые сервисы
                                 await tarifs.update_one(
                                     {"area_zone": zone_obj["area_zone"]},
                                     {"$push": {"services": {"$each": new_services}}}
                                 )
                                 print(f"Added {len(new_services)} new services to zone {zone_obj['area_zone']}")
-                        # if zone_doc:
-                        #     existing_services = zone_doc.get("services", [])
-                        #     new_services = []
-
-                        #     for service in zone_obj["services"]:
-                        #         # проверяем, есть ли сервис с таким же именем
-                        #         if not any(s["name"] == service["name"] for s in existing_services):
-                        #             new_services.append(service)
-
-                        #     if new_services:
-                        #         # Добавляем отсутствующие сервисы
-                        #         await tarifs.update_one(
-                        #             {"area_zone": zone_obj["area_zone"]},
-                        #             {"$push": {"services": {"$each": new_services}}}
-                        #         )
-                        #         print(f"Added {len(new_services)} new services to zone {zone_obj['area_zone']}")
 
 
 @app.get("/")
@@ -489,14 +392,11 @@ async def greetings():
     return {"hellow":"api is ok"}
 
 
-
 @app.post("/price")
 async def get_filtered_projects(request: FilterRequest):
     line = request.line
     if not line:
         raise HTTPException(status_code=400, detail="Input string cannot be empty")
-
- 
 
     price = await get_price(line)
     if price is None:
