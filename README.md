@@ -1,6 +1,6 @@
 # 01 Test task for Engineer
 
-lunch
+launch
 
 1.  `docker compose up --build`
 2.  go to swager `http://0.0.0.0:8000/docs#/default/get_filtered_projects_price_post`
@@ -11,6 +11,7 @@ Notes / assumptions:
 • On each start, all rows from the parser are inserted into the database.
 
 TODOS:
+
 t1) parce_pdf("../FedEx_Standard_List_Rates_2025.pdf"): -> bool
 parce
 
