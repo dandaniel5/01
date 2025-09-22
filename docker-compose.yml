@@ -10,6 +10,9 @@ services:
       MONGO_INITDB_ROOT_PASSWORD: example
     volumes:
       - mongo_data:/data/db
+    command: ["mongod", "--quiet"]
+
+  #  mongosh "mongodb://root:example@127.0.0.1:27017"
 
   backend:
     build:

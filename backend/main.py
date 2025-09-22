@@ -3,7 +3,7 @@ import os
 import re
 import math
 import pdfplumber
-from typing import Optional
+from typing import Optional, List, Tuple
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
@@ -17,8 +17,8 @@ MONGO_PORT = os.environ.get("MONGO_PORT", "27017")
 MONGO_USERNAME = os.environ.get("MONGO_USERNAME", "root")
 MONGO_PASSWORD = os.environ.get("MONGO_PASSWORD", "example")
 
-# MONGO_URI = f"mongodb://{MONGO_USERNAME}:{MONGO_PASSWORD}@{MONGO_HOST}:{MONGO_PORT}"
-MONGO_URI = "mongodb://root:example@127.0.0.1:27017/?authSource=tarifs_db"
+MONGO_URI = f"mongodb://{MONGO_USERNAME}:{MONGO_PASSWORD}@{MONGO_HOST}:{MONGO_PORT}"
+# MONGO_URI = "mongodb://root:example@127.0.0.1:27017"
 DB_NAME = "tarifs_db"
 
 client = AsyncMongoClient(MONGO_URI)
@@ -44,116 +44,23 @@ async def lifespan(app: FastAPI):
 app = FastAPI(lifespan=lifespan)
 
 
-SERVICES = {
-    "first overnight": "First Overnight",
-    "priority overnight": "Priority Overnight",
-    "standard overnight": "Standard Overnight",
-    "2day": "2Day",
-    "2day am": "2Day AM",
-    "express saver": "Express Saver",
-    "ground": "Ground",
-    "home delivery": "Home Delivery",
-}
 
-# def normalize_service(line: str) -> Optional[str]:
-#     line = line.lower()
-#     for k, v in SERVICES.items():
-#         if k in line:
-#             return v
-#     return None
+class PriceEntry(BaseModel):
+    weight: int
+    price: float
 
-# def normalize_weight(line: str) -> Optional[int]:
-#     match = re.search(r"(\d+)", line)
-#     if not match:
-#         return None
-#     return math.ceil(int(match.group(1)))
+class Service(BaseModel):
+    name: str
+    prices: List[PriceEntry]
 
-# def normalize_zone(line: str) -> Optional[str]:
-#     match = re.search(r"z(?:one)?\s*(\d+)", line.lower())
-#     if match:
-#         return f"Z{match.group(1)}"
-#     return None
+class Zone(BaseModel):
+    area_zone: int
+    services: List[Service]
+    page: int
 
-# # async def parse_pdf(pdf_path: str = "../FedEx_Standard_List_Rates_2025.pdf") -> bool:
+class FilterRequest(BaseModel):
+    line: str
 
-# #     print("parse_pdf")
-# #     async for _ in tarifs.find({}):
-# #         # если уже есть данные — не парсим повторно
-# #         return True
-
-# #     with pdfplumber.open(pdf_path) as pdf:
-# #         for page in pdf.pages:
-# #             tables = page.extract_tables()
-# #             for table in tables:
-# #                 for row in table:
-# #                     try:
-# #                         service, zone, weight, price = row
-# #                         doc = {
-# #                             "service": normalize_service(service) or service,
-# #                             "zone": normalize_zone(zone) or zone,
-# #                             "weight": normalize_weight(weight),
-# #                             "base_price": float(price),
-# #                         }
-# #                         await tarifs.insert_one(doc)
-# #                     except Exception:
-# #                         continue
-# #     return True
-
-# async def parse_pdf(pdf_path: str = "./FedEx_Standard_List_Rates_2025.pdf") -> bool:
-#     """
-#     Парсит PDF и складывает данные в MongoDB.
-
-#     :param pdf_path: Путь к PDF-файлу.
-#     :return: True, если парсинг был выполнен или данные уже существуют.
-#     """
-#     print("parse_pdf: checking for existing data...")
-
-#     # Используем find_one() для эффективной проверки наличия данных
-#     if await tarifs.find_one({}):
-#         print("parse_pdf: Data already exists. Skipping parsing.")
-#         return True
-
-#     print("parse_pdf: No data found. Starting PDF parsing...")
-
-#     data_to_insert = []
-#     try:
-#         # Примечание: pdfplumber.open() является блокирующей операцией.
-#         # В реальном приложении для больших файлов ее стоит вынести в
-#         # отдельный поток, например, с помощью run_in_executor.
-#         with pdfplumber.open(pdf_path) as pdf:
-#             for page in pdf.pages:
-#                 tables = page.extract_tables()
-#                 for table in tables:
-#                     for row in table:
-#                         try:
-#                             service, zone, weight, price = row
-#                             doc = {
-#                                 "service": normalize_service(service) or service,
-#                                 "zone": normalize_zone(zone) or zone,
-#                                 "weight": normalize_weight(weight),
-#                                 "base_price": float(price),
-#                             }
-#                             data_to_insert.append(doc)
-#                         except Exception as e:
-#                             # Пропускаем строки, которые не соответствуют ожидаемому формату
-#                             print(f"Error parsing row: {e} - Row: {row}")
-#                             continue
-#     except Exception as e:
-#         print(f"parse_pdf: An error occurred during file processing: {e}")
-#         return False
-
-#     if data_to_insert:
-#         try:
-#             # Используем insert_many() для пакетной вставки, это намного эффективнее
-#             await tarifs.insert_many(data_to_insert)
-#             print(f"parse_pdf: Successfully inserted {len(data_to_insert)} documents.")
-#         except Exception as e:
-#             print(f"parse_pdf: An error occurred during bulk insert: {e}")
-#             return False
-#     else:
-#         print("parse_pdf: No valid data found to insert.")
-
-#     return True
 
 async def get_price(line: str) -> Optional[float]:
     
@@ -174,133 +81,254 @@ async def get_price(line: str) -> Optional[float]:
     )
     return doc["base_price"] if doc else None
 
-def normalize_service(service):
-    """Normalize service names to a consistent format."""
-    if not isinstance(service, str):
-        return None
-    service = service.lower().replace("fedex\n", "").replace("®", "").strip()
-    if "first overnight" in service:
-        return "First Overnight"
-    if "priority overnight" in service:
-        return "Priority Overnight"
-    if "standard overnight" in service:
-        return "Standard Overnight"
-    if "2day a.m." in service:
-        return "2Day A.M."
-    if "2day" in service:
-        return "2Day"
-    if "express saver" in service:
-        return "Express Saver"
+
+
+# ------------------------------------------
+# Вспомогательные нормализации
+# ------------------------------------------
+
+
+def normalize_zone(text: str) -> Tuple[Optional[str], bool]:
+    """
+    Извлекает зону из текста заголовка и возвращает:
+    - zone (str или None)
+    - has_to (bool) — True, если в ключевой фразе было 'to'
+    """
+    if not text:
+        return None, False
+
+    text = text.strip()
+    has_to = False
+
+    # Ключевые фразы
+    patterns = [
+        (r"U\.S\. package rates to\s*(.*)", True),
+        (r"U\.S\. package rates:\s*(.*)", False)
+    ]
+
+    for pattern, to_flag in patterns:
+        m = re.search(pattern, text, re.IGNORECASE)
+        if m:
+            zone_text = m.group(1).strip()
+            return zone_text, to_flag
+
+    # Если не нашли, ищем "Zone <номер>"
+    m = re.search(r"Zone\s*(\d+)", text, re.IGNORECASE)
+    if m:
+        return m.group(1).strip(), False
+
+    # Возвращаем исходный текст и False, если ничего не найдено
+    return text, False
+
+def normalize_weight(raw: str):
+    """Парсим вес, возвращаем список чисел"""
+    raw = raw.strip().lower()
+    m = re.match(r"(\d+)", raw)
+    if m:
+        return [int(m.group(1))]
     return None
 
-def normalize_zone(zone):
-    """Normalize zone data."""
-    if not isinstance(zone, str):
+def parse_price(raw: str):
+    """Парсим цену"""
+    raw = raw.replace("$", "").replace(",", "").strip()
+    try:
+        return float(raw)
+    except ValueError:
         return None
-    cleaned_zone = zone.replace('–', '-').strip()
-    if 'zone' in cleaned_zone.lower():
-        cleaned_zone = cleaned_zone.lower().replace('zone', '').strip()
-    if cleaned_zone.isdigit() or ('-' in cleaned_zone and all(part.isdigit() for part in cleaned_zone.split('-'))):
-        return cleaned_zone
+
+
+
+
+VALID_SERVICES = [
+    "first overnight",
+    "priority overnight",
+    "standard overnight",
+    "2day am",
+    "2day",
+    "express saver",
+]
+
+def normalize_service(text: str):
+    """
+    Приводим название сервиса к ключу:
+    - убираем переносы строк, лишние пробелы
+    - убираем символы ® и @
+    - оставляем только реальные типы FedEx
+    """
+    if not text:
+        return None
+
+    # чистим текст: переносы строк, табуляции, множественные пробелы
+    text = re.sub(r'\s+', ' ', text.lower()).strip()
+    text = text.replace("®", "").replace("@", "").strip()
+
+    # ищем совпадение с валидными сервисами
+    for service in VALID_SERVICES:
+        if service in text:
+            # возвращаем корректное название с title
+            return service.title()
+
+    # если строка не валидный сервис — игнорируем
     return None
 
-def normalize_weight(weight):
-    """Normalize weight data, handling multi-line text and cleaning up suffixes."""
-    if not isinstance(weight, str):
-        return None
-    # Split by newline and get all numbers
-    weights = [w.strip().replace('lbs.', '').replace('lb.', '').replace('lbs', '').replace('lb', '')
-               for w in weight.split('\n') if w.strip() and w.strip().replace('.', '', 1).isdigit()]
 
-    # Handle weight ranges and single values
-    normalized_weights = []
-    for w in weights:
-        if '–' in w:
-            start, end = w.split('–')
-            normalized_weights.extend(range(int(start), int(end) + 1))
-        else:
-            normalized_weights.append(float(w))
+# ------------------------------------------
+# Основной парсер
+# ------------------------------------------
 
-    return normalized_weights if normalized_weights else None
+VALID_RANGES = [(1, 26)] 
 
-def parse_price(price_str):
-    """Extract and clean prices from a string, which can contain multiple prices."""
-    if not isinstance(price_str, str):
-        return None
-
-    # Remove all non-numeric characters except '.'
-    prices = [p.replace('$', '').replace(',', '').strip() for p in price_str.split('\n') if p.strip()]
-
-    # Convert to float and return a list
-    cleaned_prices = []
-    for p in prices:
-        try:
-            cleaned_prices.append(float(p))
-        except ValueError:
-            continue
-
-    return cleaned_prices if cleaned_prices else None
-
+def is_valid_weight(weight: int) -> bool:
+    """Проверяем, попадает ли вес в допустимые диапазоны"""
+    for start, end in VALID_RANGES:
+        if start <= weight <= end:
+            return True
+    return False
 
 async def parse_pdf(file_path):
     all_records = []
     with pdfplumber.open(file_path) as pdf:
-        for page in pdf.pages:
-            tables = page.extract_tables()
-            for table in tables:
-                services = []
-                # First pass to identify services
-                for row in table:
-                    if len(row) > 1 and isinstance(row[0], str):
-                        service_name = normalize_service(row[0])
-                        if service_name:
-                            services.append(service_name)
+        for page_idx, page in enumerate(pdf.pages):
+            if is_valid_weight(page_idx):
+                page_text = page.extract_text()
+                tables = page.extract_tables()
+                
+                if page_text:
+                    zone, has_to = normalize_zone(page_text)
+                    
+                  
+                    
+                    # Если ключевая фраза содержала "to", берём номер зоны из таблицы
+                    if tables and has_to:
+                        for first_table in tables:
+                            if len(first_table) > 1:  # минимум 2 строки
+                                # проверяем вторую строку
+                                second_row = first_table[1]
 
-                # If no services found, this is not a service rate table
-                if not services:
-                    continue
+                                hard_zone_name = None
 
-                for row in table:
-                    # Skip rows that are clearly headers or invalid
-                    if len(row) < 4 or row[0] is None or 'weight' in str(row[0]).lower():
-                        continue
+                                # пробуем взять -5 элемент
+                                if len(second_row) >= 5 and second_row[-5]:
+                                    hard_zone_name = second_row[-5].strip()
+                                # если нет, пробуем -3 элемент
+                                elif len(second_row) >= 3 and second_row[-3]:
+                                    hard_zone_name = second_row[-3].strip()
 
-                    zone = normalize_zone("U.S. rates: Zone 2") # Assuming a fixed zone for simplicity from the logs
-                    weights_data = normalize_weight(str(row[0]))
-                    if not weights_data:
-                        continue
+                                # если нашли, присваиваем zone
+                                if hard_zone_name:
+                                    zone = hard_zone_name
+                    
+                    print("zone   ", zone )
+                    print("service_name", service_name)     
+                    
+                    
+                    if tables and not has_to:
+                        for table in tables:
+                            service_names = []
 
-                    # The data is structured where the first column is the weight(s) and the following columns are prices.
-                    # This assumes the table format is [Weights, Price1, Price2, ...], so we pair the weights with prices.
-                    prices_data = [parse_price(str(p)) for p in row[1:]]
+                            
+                            header_row = table[1]
+                            
+                            for cell in header_row:
+                                if cell and ("@" in cell or "®" in cell):
+                                    
+                                    # service_name = normalize_service(cell)
+                                    # Service ={
+                                    #     name: service_name,
+                                    #     prices: []
+                                    # }
+                                    #     проходим по таблице 
+                                    #     создаем массив 
+                                    #     число из 0 стобца i строки : число из index стобца i строки
+                                    #         каждый проход делаем апенд prices
+                                        
+                                    # if service_name:
+                                    #     print("service_name", service_name)
+                                    #     service_names.append(service_name)
+                                    
+                
+                    
+                            # if not service_names:
+                            #     continue  # если услуг не нашли, пропускаем таблицу
 
-                    # Flatten the lists and pair them with the services
-                    if weights_data and prices_data:
-                        all_prices = []
-                        for price_list in prices_data:
-                            if price_list:
-                                all_prices.extend(price_list)
+                            # # теперь идём по строкам с весами и ценами
+                            # for row in table[1:]:  # пропускаем шапку
+                            #     if not row or len(row) < 2:
+                            #         continue
 
-                        if len(weights_data) == len(all_prices):
-                            for i, weight in enumerate(weights_data):
-                                for j, service in enumerate(services):
-                                    price_index = (len(services) * i) + j
-                                    if price_index < len(all_prices):
-                                        all_records.append({
-                                            'service': service,
-                                            'zone': zone,
-                                            'weight': float(weight),
-                                            'price': all_prices[price_index]
-                                        })
-    print("all_records", all_records)
-    return pd.DataFrame(all_records)
+                            #     weight_data = normalize_weight(str(row[0]))
+                            #     if not weight_data:
+                            #         continue
+
+                            #     weight = weight_data[0]
+
+                            #     # фильтруем по диапазону весов, если нужно
+                            #     if not is_valid_weight(weight):
+                            #         continue
+
+                            #     # остальные колонки — цены
+                            #     prices = [parse_price(c) for c in row[1:] if c]
+                            #     for i, price in enumerate(prices):
+                            #         if price is None:
+                            #             continue
+                            #         service = service_names[i % len(service_names)]
+                            #         all_records.append({
+                            #             "service": service,
+                            #             "zone": zone or "N/A",
+                            #             "weight": weight,
+                            #             "price": price,
+                            #             "page": page_idx + 1
+                            #         })
+
+                        # tables = page.extract_tables()
+                        # if tables:
+                        #     for table in tables:
+                        #         # Delivery commitment3  
+                        #         for row in table:
+                        #             first_cell = row[0]
+                        #             if first_cell:
+                        #                 if "delivery commitment" in first_cell.lower():
+                        #                     # новый блок, очищаем текущие сервисы
+                        #                     current_block_services = []
+                        #                     continue
+
+                        #                     # пробуем нормализовать сервис из первой колонки
+                        #                     service_name = normalize_service(first_cell)
+                        #                     if service_name:
+                        #                         # нашли реальный сервис, добавляем в текущий блок
+                        #                         current_block_services.append(service_name)
+
+                        #                     # если блок с сервисами найден, парсим веса и цены
+                        #                     if current_block_services:
+                        #                         weights_data = normalize_weight(str(row[0]))
+                        #                         if not weights_data:
+                        #                             continue
+
+                        #                         # остальные колонки — цены
+                        #                         prices = [parse_price(c) for c in row[1:] if c]
+                        #                         for i, price in enumerate(prices):
+                        #                             if price is None:
+                        #                                 continue
+                        #                             service = current_block_services[i % len(current_block_services)]
+                        #                             all_records.append({
+                        #                                 "service": service,
+                        #                                 "zone": zone or "N/A",
+                        #                                 "weight": weights_data[0],
+                        #                                 "price": price,
+                        #                                 "page": page_idx + 1
+                        #                             })
+
+        if all_records:
+            await tarifs.insert_many(all_records)
+        print(f"✅ Загружено {len(all_records)} тарифов")
+        return pd.DataFrame(all_records)
+
+
 
 @app.get("/")
 async def greetings():
     return {"hellow":"api is ok"}
 
-class FilterRequest(BaseModel):
-    line: str
 
 @app.post("/price")
 async def get_filtered_projects(request: FilterRequest):
