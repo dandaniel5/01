@@ -1,46 +1,32 @@
 # 01 Test task for Engineer
 
-launch
+# launch
 
 1.  `docker compose up --build`
 2.  go to swager `http://0.0.0.0:8000/docs#/default/get_filtered_projects_price_post`
 3.  endpoint also post("/price")
 
-Notes / assumptions:
-• The database is hydrated on every start, coz a time limit.
-• On each start, all rows from the parser are inserted into the database.
+# Info
 
-TODOS:
+    •	On each start, all rows are popped from the DB. The DB is erased and populated again with only the new data.
 
-t1) parce_pdf("../FedEx_Standard_List_Rates_2025.pdf"): -> bool
-parce
+    tried with no result:
+    •	Tika
+    •	Tesseract
+    •	pdfplumber
+    •	pdfminer
+    •	Converting to images, adding contrast and saturation
 
-t2) normolize_service(zone: str): -> string
-services = [First Overnight, Priority Overnight, Standard Overnight, 2Day, 2Day AM, Express Saver, Ground, Home Delivery]
+Claude PDF Tools — works well, but has a very low free limit.
+GPT doesn’t understand that file.
+I ended up splitting it into 33 pages to keep only the required info.
+Then I shrank it into eleven 3-page files.
+After that, I put it into Gemini — it parsed about 2–8 pages, and I parsed the other 4 files with macOS OCR.
+Finally, I put it into an app, converted to CSV, and inserted into MongoDB.
 
-t3) normolize_weight(string of number) -> interger
-decapitalize all with reg.
-weight = [5 lb, 5 lbs, 6ld, 6lbs]
-return вес с округлением
+At first, I felt like my hands were tied without paid models.
 
-t4) normolize_zone(string of number) -> string
-decapitalize all with reg.
-zones = [zone 5, zone5, z5]
+# Extra
 
-t4) parce_string(string of number) -> []
-strip string with reg
-return normolize_delivery_options(), normolize_zone() ,normolize_weight()
-
-t4) make get_price(line: str) -> Decimal|float
-#main fn
-delivery_option ,zone, weight = parce_string(line)
-search from db base.Tarifs.find_one({delivery_option ,zone, weight},{"\_id":0})
-
-t5) @app.post(/price)
-async def get_filtered_projects(request: FilterRequest):
-line = request.line
-if not line:
-raise HTTPException(status_code=400, detail="Input string cannot be empty")
-return get_price(line)
-
-t6) dockerize
+shart mongosh inside mongo contaner
+`mongosh "mongodb://root:example@127.0.0.1:27017"`

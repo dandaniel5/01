@@ -6,6 +6,7 @@ EXPOSE 8000
 
 WORKDIR /app
 
+
 COPY requirements.txt ./
 COPY FedEx_Standard_List_Rates_2025.pdf ./
 RUN pip install --no-cache-dir --upgrade pip
