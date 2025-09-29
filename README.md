@@ -6,6 +6,12 @@
 2.  go to swager `http://0.0.0.0:8000/docs#/default/get_filtered_projects_price_post`
 3.  endpoint also post("/price")
 
+```example request
+    {
+    "line": "Home Delivery zone 3 5 lb"
+    }
+```
+
 # Info
 
     •	On each start, all rows are popped from the DB. The DB is erased and populated again with only the new data.
@@ -30,3 +36,7 @@ At first, I felt like my hands were tied without paid models.
 
 shart mongosh inside mongo contaner
 `mongosh "mongodb://root:example@127.0.0.1:27017"`
+
+```
+
+```
